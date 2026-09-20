@@ -811,7 +811,13 @@ textarea { resize: vertical; min-height: 80px; font-family: 'DM Mono', monospace
         <p style="font-size:13px; color:var(--text2); line-height:1.6;">Sends Hannah a print-ready page with your logo and a big QR code. She prints it and posts it at the entrance. Guests just point their phone camera at it, no app or Claude account needed.</p>
         <div class="form-group">
           <label>Check-in link for QR code</label>
-          <input type="text" id="qrUrlInput" placeholder="e.g. https://bit.ly/4roC6Qa" oninput="renderQRDisplay()">
+          <div style="display:flex;gap:8px;">
+            <input type="text" id="qrUrlInput" placeholder="e.g. https://tinyurl.com/nyc-schnauzers-checkin" oninput="renderQRDisplay()" onpaste="setTimeout(()=>{renderQRDisplay();showToast('URL set — QR ready');},50)" style="flex:1;">
+            <button class="btn btn-secondary" onclick="renderQRDisplay();showToast('QR updated');" style="white-space:nowrap;flex-shrink:0;">Set URL</button>
+          </div>
+        </div>
+        <div id="qrPreviewWrap" style="display:none;align-items:center;justify-content:center;padding:8px 0;">
+          <div id="qrDisplayCode" style="display:inline-block;"></div>
         </div>
         <button class="btn btn-primary" onclick="emailQRToHannah()">Email print-ready QR to Hannah</button>
       </div>
@@ -1784,25 +1790,21 @@ function exportCheckins() {
 //  QR Code
 // ────────────────────────────────────────────────
 function renderQRDisplay() {
-  // Copy logo src from the attendee screen topbar logo
-  const allLogos = document.querySelectorAll('.logo-img');
-  const logoSrc = Array.from(allLogos).find(el => el.id !== 'qrDisplayLogo');
-  if (logoSrc) {
-    document.getElementById('qrDisplayLogo').src = logoSrc.src;
-  }
-  // Render QR code into the display panel
+  const url = (document.getElementById('qrUrlInput') && document.getElementById('qrUrlInput').value.trim()) || window.location.href;
   const container = document.getElementById('qrDisplayCode');
+  if (!container) return;
   container.innerHTML = '';
-  const url = document.getElementById('qrUrlInput') && document.getElementById('qrUrlInput').value.trim();
-  const target = url || window.location.href;
   new QRCode(container, {
-    text: target,
-    width: 240,
-    height: 240,
+    text: url,
+    width: 200,
+    height: 200,
     colorDark: '#1A2B1E',
     colorLight: '#ffffff',
     correctLevel: QRCode.CorrectLevel.M
   });
+  // Show the preview
+  const wrap = document.getElementById('qrPreviewWrap');
+  if (wrap) wrap.style.display = 'flex';
 }
 
 function regenerateQR() {
@@ -1873,18 +1875,24 @@ function buildQRPage(qrDataUrl, logoDataUrl, url) {
 }
 
 function emailQRToHannah() {
-  const canvas = getQRCanvas();
-  if (!canvas) { showToast('Paste a check-in URL in the field above first'); return; }
-  // Show email modal
-  document.getElementById('hannahEmailModal').style.display = 'flex';
-  const emailInput = document.getElementById('hannahEmailInput');
-  if (emailInput && !emailInput.value) emailInput.value = 'hannah@';
-  if (emailInput) { emailInput.focus(); emailInput.select(); }
+  const urlInput = document.getElementById('qrUrlInput');
+  const url = urlInput && urlInput.value.trim();
+  if (!url) { showToast('Paste your check-in URL first, then tap Set URL'); return; }
+  // Ensure QR is rendered
+  renderQRDisplay();
+  // Give QRCode.js one tick to render before opening modal
+  setTimeout(() => {
+    document.getElementById('hannahEmailModal').style.display = 'flex';
+    const emailInput = document.getElementById('hannahEmailInput');
+    if (emailInput && !emailInput.value) emailInput.value = 'hannah@';
+    if (emailInput) { emailInput.focus(); emailInput.select(); }
+  }, 100);
 }
 
 function sendEmailToHannah() {
   const email = document.getElementById('hannahEmailInput') ? document.getElementById('hannahEmailInput').value.trim() : '';
   if (!email || !email.includes('@')) { showToast('Please enter a valid email'); return; }
+  renderQRDisplay();
   const canvas = getQRCanvas();
   if (!canvas) { showToast('Paste a check-in URL first'); return; }
   const dataUrl = canvas.toDataURL('image/png');
