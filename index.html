@@ -835,7 +835,7 @@ textarea { resize: vertical; min-height: 80px; font-family: 'DM Mono', monospace
         <div class="form-group">
           <label>Check-in link for QR code</label>
           <div style="display:flex;gap:8px;">
-            <input type="text" id="qrUrlInput" value="https://magg6789.github.io/nyc-schnauzers/" placeholder="e.g. https://tinyurl.com/nyc-schnauzers-checkin" oninput="renderQRDisplay()" onpaste="setTimeout(()=>{renderQRDisplay();showToast('URL set — QR ready');},50)" style="flex:1;">
+            <input type="text" id="qrUrlInput" value="https://tinyurl.com/nyc-schnauzers-checkin" placeholder="e.g. https://tinyurl.com/nyc-schnauzers-checkin" oninput="renderQRDisplay()" onpaste="setTimeout(()=>{renderQRDisplay();showToast('URL set — QR ready');},50)" style="flex:1;">
             <button class="btn btn-secondary" onclick="renderQRDisplay();showToast('QR updated');" style="white-space:nowrap;flex-shrink:0;">Set URL</button>
           </div>
         </div>
