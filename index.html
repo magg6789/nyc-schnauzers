@@ -511,6 +511,14 @@ textarea { resize: vertical; min-height: 80px; font-family: 'DM Mono', monospace
         </label>
       </div>
     </div>
+    <div class="form-group">
+      <label>Payment</label>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <div class="chip ci-pay-btn" data-status="paid" onclick="pickCiPay('paid')">Paid</div>
+        <div class="chip ci-pay-btn" data-status="ask" onclick="pickCiPay('ask')">Ask about payment</div>
+        <div class="chip ci-pay-btn" data-status="unpaid" onclick="pickCiPay('unpaid')">Did not pay (ask)</div>
+      </div>
+    </div>
     <div style="display:flex; gap:10px;">
       <button class="btn btn-secondary" style="flex:1;" onclick="closeCheckinModal()">Cancel</button>
       <button class="btn btn-green" style="flex:2;" onclick="confirmCheckin()">✓ Check In</button>
@@ -636,6 +644,19 @@ textarea { resize: vertical; min-height: 80px; font-family: 'DM Mono', monospace
 </div>
 
 <!-- ████  UNDO MODAL  ████ -->
+<div id="paymentModal" class="modal-overlay" hidden>
+  <div class="modal">
+    <div class="modal-title" id="payModalName">Payment</div>
+    <div id="payModalCurrent" style="font-size:14px; color:var(--text2);"></div>
+    <div class="modal-body">
+      <button class="btn btn-green" style="width:100%;" onclick="setPaymentStatus('paid')">Paid</button>
+      <button class="btn" style="width:100%; background:var(--amber-light); color:var(--amber);" onclick="setPaymentStatus('ask')">Ask about payment (partial or double payment?)</button>
+      <button class="btn btn-danger" style="width:100%;" onclick="setPaymentStatus('unpaid')">Did not pay (ask)</button>
+    </div>
+    <button class="btn btn-secondary" style="width:100%;" onclick="closePaymentModal()">Cancel</button>
+  </div>
+</div>
+
 <div id="unCheckModal" class="modal-overlay" hidden>
   <div class="modal">
     <div class="modal-title" id="ucName">Undo Check-in?</div>
@@ -769,6 +790,8 @@ textarea { resize: vertical; min-height: 80px; font-family: 'DM Mono', monospace
         <div class="chip" onclick="setFilter('checked', this)" data-filter="checked">✓ Checked</div>
         <div class="chip" onclick="setFilter('first', this)" data-filter="first">🌟 First timer</div>
         <div class="chip" onclick="setFilter('walkin', this)" data-filter="walkin">Walk-in</div>
+        <div class="chip" onclick="setFilter('unpaid', this)" data-filter="unpaid">Did not pay</div>
+        <div class="chip" onclick="setFilter('ask', this)" data-filter="ask">Ask about payment</div>
       </div>
     </div>
 
@@ -812,7 +835,7 @@ textarea { resize: vertical; min-height: 80px; font-family: 'DM Mono', monospace
         <div class="form-group">
           <label>Check-in link for QR code</label>
           <div style="display:flex;gap:8px;">
-            <input type="text" id="qrUrlInput" placeholder="e.g. https://tinyurl.com/nyc-schnauzers-checkin" oninput="renderQRDisplay()" onpaste="setTimeout(()=>{renderQRDisplay();showToast('URL set — QR ready');},50)" style="flex:1;">
+            <input type="text" id="qrUrlInput" value="https://magg6789.github.io/nyc-schnauzers/" placeholder="e.g. https://tinyurl.com/nyc-schnauzers-checkin" oninput="renderQRDisplay()" onpaste="setTimeout(()=>{renderQRDisplay();showToast('URL set — QR ready');},50)" style="flex:1;">
             <button class="btn btn-secondary" onclick="renderQRDisplay();showToast('QR updated');" style="white-space:nowrap;flex-shrink:0;">Set URL</button>
           </div>
         </div>
@@ -1101,8 +1124,8 @@ function parseCSV(text) {
   const dogIdx = headers.findIndex(h => h.includes("dog") && h.includes("name"));
   const instaIdx = headers.findIndex(h => h.includes("instagram"));
   const emailIdx = headers.findIndex(h => h.includes("email"));
-  const firstMeetupIdx = headers.findIndex(h => h.includes("first") && h.includes("meetup"));
-  const emailListIdx = headers.findIndex(h => h.includes("email list"));
+  const firstMeetupIdx = headers.findIndex(h => h.includes("first") && (h.includes("meetup") || h.includes("meet up")));
+  const emailListIdx = headers.findIndex(h => h.includes("email list") || h.includes("mailing list"));
   const volunteerIdx = headers.findIndex(h => h.includes("help") || h.includes("volunteer") || h.includes("treat"));
   const plusOneIdx = headers.findIndex(h => h.includes("plus one") || h.includes("is plus"));
 
@@ -1217,11 +1240,13 @@ async function submitImport() {
     if (db) {
       await clearAllFromDB();
 
+      // One shared id per row, used for both the database write and the local list
+      const stamp = Date.now();
       // Write guests in parallel batches of 5 to avoid rate limits
       for (let i = 0; i < rows.length; i += 5) {
         const batch = rows.slice(i, i + 5);
         await Promise.all(batch.map((g, j) => {
-          const id = `g_${Date.now()}_${i + j}`;
+          const id = `g_${stamp}_${i + j}`;
           return db.doc(`guests/${id}`).set({
             name: g.name,
             dogName: g.dogName || '',
@@ -1232,13 +1257,14 @@ async function submitImport() {
             volunteer: g.volunteer || '',
             status: g.status,
             isWalkin: false,
+            paymentStatus: 'unpaid',
           });
         }));
       }
 
       // Update local guests array immediately so updateUI() shows the data
       // (don't wait for the onSnapshot to fire, which is async)
-      guests = rows.map((g, i) => ({id: `g_${Date.now()}_${i}`, ...g, isWalkin: false}));
+      guests = rows.map((g, i) => ({id: `g_${stamp}_${i}`, ...g, isWalkin: false, paymentStatus: 'unpaid'}));
       guests.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
       checkinState = {};
 
@@ -1352,6 +1378,73 @@ function renderAttendeeResults() {
   }).join('');
 }
 
+// ────────────────────────────────────────────────
+//  Payment status
+// ────────────────────────────────────────────────
+const PAY_LABELS = {
+  paid: 'Paid',
+  ask: 'Ask about payment (partial or double payment?)',
+  unpaid: 'Did not pay (ask)'
+};
+const PAY_SHORT = {paid: 'Paid', ask: 'Ask about payment', unpaid: 'Did not pay (ask)'};
+const PAY_STYLE = {
+  paid: 'background:var(--green-light);color:var(--green);',
+  ask: 'background:var(--amber-light);color:var(--amber);',
+  unpaid: 'background:var(--red-light);color:var(--red);'
+};
+let ciPaySelected = 'unpaid';
+let paymentGuestId = null;
+
+function payStatus(g) {
+  return (g && g.paymentStatus) || 'unpaid';
+}
+
+function payBadge(g) {
+  const s = payStatus(g);
+  return `<span class="badge" style="${PAY_STYLE[s]} font-size:11px; cursor:pointer;" onclick="event.stopPropagation();openPaymentModal('${g.id}')">${PAY_SHORT[s]}</span>`;
+}
+
+async function savePayment(guestId, status) {
+  const g = guests.find(x => x.id === guestId);
+  if (g) g.paymentStatus = status;
+  if (db) {
+    try { await db.doc(`guests/${guestId}`).set({paymentStatus: status}); }
+    catch(e) { console.error('save payment', e); showToast('Could not save payment. Try again.', 4000); }
+  }
+  updateUI();
+}
+
+function openPaymentModal(guestId) {
+  const g = guests.find(x => x.id === guestId);
+  if (!g) return;
+  paymentGuestId = guestId;
+  document.getElementById('payModalName').textContent = `Payment: ${g.name}`;
+  document.getElementById('payModalCurrent').textContent = `Current: ${PAY_LABELS[payStatus(g)]}`;
+  document.getElementById('paymentModal').hidden = false;
+}
+
+function closePaymentModal() {
+  document.getElementById('paymentModal').hidden = true;
+  paymentGuestId = null;
+}
+
+async function setPaymentStatus(status) {
+  if (!paymentGuestId) return;
+  const id = paymentGuestId;
+  closePaymentModal();
+  await savePayment(id, status);
+  showToast(`Payment set: ${PAY_SHORT[status]}`);
+}
+
+function pickCiPay(status) {
+  ciPaySelected = status;
+  renderCiPayPicker();
+}
+
+function renderCiPayPicker() {
+  document.querySelectorAll('.ci-pay-btn').forEach(b => b.classList.toggle('active', b.dataset.status === ciPaySelected));
+}
+
 function renderOrgList() {
   const list = document.getElementById('orgList');
   const empty = document.getElementById('orgEmpty');
@@ -1376,6 +1469,8 @@ function renderOrgList() {
   else if (orgFilter === 'checked') filtered = filtered.filter(g => isCheckedIn(g.id));
   else if (orgFilter === 'first') filtered = filtered.filter(g => getCheckin(g.id)?.isFirstTimer);
   else if (orgFilter === 'walkin') filtered = filtered.filter(g => g.isWalkin);
+  else if (orgFilter === 'unpaid') filtered = filtered.filter(g => payStatus(g) === 'unpaid');
+  else if (orgFilter === 'ask') filtered = filtered.filter(g => payStatus(g) === 'ask');
 
   if (filtered.length === 0) {
     list.innerHTML = '';
@@ -1400,6 +1495,7 @@ function renderOrgList() {
         ${checked ? `<div style="font-size:11px; color:var(--green);">✓ ${fmt(ci.checkedInAt)}</div>` : ''}
       </div>
       <div class="org-badges">
+        ${payBadge(g)}
         ${firstTimer ? `<span class="badge badge-amber" style="font-size:11px;">🌟</span>` : ''}
         ${g.volunteer?.toLowerCase().includes('yes') ? `<span class="badge badge-gray" style="font-size:11px;">🙋</span>` : ''}
       </div>
@@ -1458,6 +1554,8 @@ function startCheckin(guestId) {
   if (!g) return;
   currentPendingGuest = g;
 
+  ciPaySelected = payStatus(g);
+  renderCiPayPicker();
   document.getElementById('ciModalName').textContent = `Check in ${g.name}`;
   document.getElementById('ciFirstTimer').checked = false;
 
@@ -1488,9 +1586,11 @@ async function confirmCheckin() {
   if (!currentPendingGuest) return;
   const g = currentPendingGuest;
   const isFirstTimer = document.getElementById('ciFirstTimer').checked;
+  const paySel = ciPaySelected;
   const now = Date.now();
 
   closeCheckinModal();
+  await savePayment(g.id, paySel);
 
   if (db) {
     await db.doc(`checkins/${g.id}`).set({checkedIn: true, checkedInAt: now, isFirstTimer});
@@ -1578,6 +1678,7 @@ async function submitSelfWalkin() {
     isWalkin: true,
     isFirstTimer: false,
     paidFee: paid,
+    paymentStatus: paid ? 'paid' : 'unpaid',
     status: 'Going',
   };
 
